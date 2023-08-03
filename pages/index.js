@@ -1,118 +1,195 @@
-import Image from 'next/image'
-import { Inter } from 'next/font/google'
+import { addDoc, collection, doc, getDoc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
+import ButtonActions from "../components/ButtonActions/index";
+import { useEffect, useState, useRef } from "react";
+import { firestoreDb } from "@/firebase";
 
-const inter = Inter({ subsets: ['latin'] })
+const ICE_SERVERS = {
+  iceServers: [
+    {
+      urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"],
+    },
+  ],
+  iceCandidatePoolSize: 10,
+};
 
 export default function Home() {
-  return (
-    <main
-      className={`flex min-h-screen flex-col items-center justify-between p-24 ${inter.className}`}
-    >
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">pages/index.js</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
+  const [isCameraAccess, setIsCameraAccess] = useState(false);
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700/10 after:dark:from-sky-900 after:dark:via-[#0141ff]/40 before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
+  const peerConnection = useRef(null);
+  const localVideo = useRef(null);
+  const remoteVideo = useRef(null);
+
+  useEffect(() => {
+    peerConnection.current = new RTCPeerConnection(ICE_SERVERS);
+  }, []);
+
+  const answerCall = async () => {
+    const offerCandidates = collection(firestoreDb, "calls/1/offerCandidates");
+    const answerCandidates = collection(firestoreDb, `calls/1/answerCandidates`);
+
+    const docRef = doc(firestoreDb, "calls", "1");
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists()) {
+      console.log("Document data:", docSnap.data());
+
+      peerConnection.current.onicecandidate = async (event) => {
+        // event.candidate && answerCandidates.add(event.candidate.toJSON());
+        if (event.candidate) {
+          const docRef = await addDoc(answerCandidates, event.candidate.toJSON());
+        }
+      };
+
+      const callData = docSnap.data();
+
+      const offerDescription = callData.offer;
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offerDescription));
+
+      const answerDescription = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answerDescription);
+
+      const answer = {
+        type: answerDescription.type,
+        sdp: answerDescription.sdp,
+      };
+
+      // await callDoc.update({ answer });
+      const answerUpdate = doc(firestoreDb, "calls", "1");
+
+      // Set the answer in the firestore
+      await updateDoc(answerUpdate, { answer });
+
+      onSnapshot(offerCandidates, (doc) => {
+        doc.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            const candidate = new RTCIceCandidate(change.doc.data());
+            peerConnection.current.addIceCandidate(candidate);
+          }
+        });
+      });
+
+    } else {
+      // docSnap.data() will be undefined in this case
+      console.log("No such document!");
+    }
+  }
+
+  const makeCall = async () => {
+
+    const callDoc = collection(firestoreDb, "calls");
+    const offerCandidates = collection(firestoreDb, "calls/1/offerCandidates");
+    const answerCandidates = collection(firestoreDb, `calls/1/answerCandidates`);
+
+    // Create offer
+    const offerDescription = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offerDescription);
+
+    // Get candidates for caller, save to db
+    try {
+      peerConnection.current.onicecandidate = async (event) => {
+        // event.candidate && offerCandidates.add(event.candidate.toJSON());
+        // Add a new document with a generated id.
+        if (event.candidate) {
+          const docRef = await addDoc(offerCandidates, event.candidate.toJSON());
+        }
+      };
+    } catch (error) {
+      console.log(error)
+    }    
+
+    const offer = {
+      sdp: offerDescription.sdp,
+      type: offerDescription.type,
+    };
+
+    // create reference to the document
+    const offerRef = doc(firestoreDb, "calls", "1");
+    const docRef = await setDoc(offerRef, { offer });
+
+    // Listen for remote answer
+    onSnapshot(doc(firestoreDb, "calls", "1"), (doc) => {
+      const data = doc.data();
+      if (!peerConnection.current.currentRemoteDescription && data?.answer) {
+        const answerDescription = new RTCSessionDescription(data.answer);
+        peerConnection.current.setRemoteDescription(answerDescription);
+      }
+    });
+
+    // When answered, add candidate to peer connection
+    onSnapshot(answerCandidates, (doc) => {
+      doc.docChanges().forEach((change) => {
+        if (change.type === "added") {
+          const candidate = new RTCIceCandidate(change.doc.data());
+          peerConnection.current.addIceCandidate(candidate);
+        }
+      });
+    });
+  };
+
+  const getCameraAccess = async () => {
+    try {
+      const localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      const remoteStream = new MediaStream();
+
+      if (peerConnection.current) {
+        // Push tracks from local stream to peer connection
+        localStream.getTracks().forEach((track) => {
+          peerConnection.current.addTrack(track, localStream);
+        });
+
+        // Pull tracks from remote stream, add to video stream
+        peerConnection.current.ontrack = (event) => {
+          event.streams[0].getTracks().forEach((track) => {
+            remoteStream.addTrack(track);
+          });
+        };
+        if (localVideo.current) {
+          localVideo.current.srcObject = localStream;
+        }
+        if (remoteVideo.current) {
+          remoteVideo.current.srcObject = remoteStream;
+        }
+        setIsCameraAccess(true);    
+      }
+    } catch (error) {
+      console.log(error);
+      alert("Something went wrong!");
+    }
+  };
+
+  return (
+    <main className="homepage flex min-h-screen flex-col items-center justify-center py-12 px-24 gap-14">
+      <h2 className="heading text-4xl">
+        Unstream video call - <b>webRTC</b>
+      </h2>
+      <div className="videos__local relative">
+        <video
+          ref={remoteVideo}
+          src=""
+          className=" bg-purple-400 rounded-2xl w-[60vw] "
+          autoPlay
+          playsInline
+        ></video>
+        <div className="video__remote absolute top-4 right-4">
+          <video
+            ref={localVideo}
+            src=""
+            className="bg-purple-600 rounded-2xl w-60 "
+            autoPlay
+            playsInline
+          ></video>
+        </div>
+        <ButtonActions
+          isCameraAccess={isCameraAccess}
+          getCameraAccess={getCameraAccess}
+          answerCall={answerCall}
+          makeCall={makeCall}
         />
       </div>
 
-      <div className="mb-32 grid text-center lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Discover and deploy boilerplate example Next.js&nbsp;projects.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
     </main>
-  )
+  );
 }
