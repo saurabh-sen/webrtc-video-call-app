@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 
 const answerCall = async (peerConnection) => {
+  alert("answering a call")
   const offerCandidates = collection(firestoreDb, "calls/1/offerCandidates");
   const answerCandidates = collection(firestoreDb, `calls/1/answerCandidates`);
 
@@ -60,6 +61,7 @@ const answerCall = async (peerConnection) => {
 };
 
 const makeCall = async (peerConnection) => {
+  alert("creating a offer")
   const callDoc = collection(firestoreDb, "calls");
   const offerCandidates = collection(firestoreDb, "calls/1/offerCandidates");
   const answerCandidates = collection(firestoreDb, `calls/1/answerCandidates`);
@@ -104,6 +106,7 @@ const makeCall = async (peerConnection) => {
       }
     });
   });
+  alert("offer created successfully")
 };
 
 const getCameraAccess = async (

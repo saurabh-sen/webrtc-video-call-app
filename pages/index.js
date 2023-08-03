@@ -27,16 +27,19 @@ export default function Home() {
       <h2 className="heading text-4xl">
         Unstream video call - <b>webRTC</b>
       </h2>
-      <p className="text-xl"> 3 steps to make a video call</p>
+      <p className="text"> 3 steps to make a video call</p>
       <ol>
-        <li className="text-xl">
+        <li className="text">
           <b>Open Camera</b> - <i>get access to video and audio</i>
         </li>
-        <li className="text-xl">
+        <li className="text">
           <b>Create Offer</b> - <i>create a offer(sdp)</i>
         </li>
-        <li className="text-xl">
-          <b>Answer Call</b> - <i>click on answer from other device</i>
+        <li className="text">
+          <b>Answer call 1 </b> - <i>open second this app in second window</i>
+        </li>
+        <li className="text">
+          <b>Answer Call 2</b> - <i>click on open camera then answer call</i>
         </li>
 
       </ol>
